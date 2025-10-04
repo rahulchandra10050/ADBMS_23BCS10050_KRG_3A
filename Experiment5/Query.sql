@@ -1,68 +1,144 @@
---------------------------------MEDIUM LEVEL PROBLEM --------------------------------------------
-Create table TRANSACTION_DATA(id int,val decimal);
-INSERT INTO TRANSACTION_DATA(ID,VAL)
-SELECT 1,RANDOM()
-FROM GENERATE_SERIES(1,1000000);
+-------------------------------------------EXPERIMENT 05 (MEDIUM LEVEL)------------------------------
 
-INSERT INTO TRANSACTION_DATA(ID,VAL)
-SELECT 2,RANDOM()
-FROM GENERATE_SERIES(1,1000000);
-SELECT * FROM TRANSACTION_DATA;
+CREATE TABLE transaction_data (
+    id INT,
+    value INT
+);
+-- For id = 1
+INSERT INTO transaction_data (id, value)
+SELECT 1, random() * 1000  -- simulate transaction amounts 0-1000
+FROM generate_series(1, 1000000);
+-- For id = 2
+INSERT INTO transaction_data (id, value)
+SELECT 2, random() * 1000
+FROM generate_series(1, 1000000);
 
-CREATE or REPLACE VIEW SALES_SUMMARY AS
-SELECT 
-ID,
-COUNT(*) AS total_quantity_sold,
-sum(val) AS total_sales,
-count(distinct id) AS total_orders
-FROM TRANSACTION_DATA
-GROUP BY ID;
+SELECT *FROM transaction_data
+
+--WITH NORMAL VIEW
+CREATE OR REPLACE VIEW sales_summary_view AS
+SELECT
+    id,
+    COUNT(*) AS total_orders,
+    SUM(value) AS total_sales,
+    AVG(value) AS avg_transaction
+FROM transaction_data
+GROUP BY id;
+
 
 EXPLAIN ANALYZE
-SELECT * FROM SALES_SUMMARY; /*Simple view */
+SELECT * FROM sales_summary_view;
 
-CREATE MATERIALIZED VIEW SALES_SUMM_MV AS
-SELECT 
-ID,
-COUNT(*) AS total_quantity_sold,
-sum(val) AS total_sales,
-count(distinct id) AS total_orders
-FROM TRANSACTION_DATA
-GROUP BY ID;
+
+
+--WITH MATERIALIZED VIEW
+CREATE MATERIALIZED VIEW sales_summary_mv AS
+SELECT
+    id,
+    COUNT(*) AS total_orders,
+    SUM(value) AS total_sales,
+    AVG(value) AS avg_transaction
+FROM transaction_data
+GROUP BY id;
+
+
 
 EXPLAIN ANALYZE
-SELECT * FROM SALES_SUMM_MV; /Materialized view/
+SELECT * FROM sales_summary_mv;
+
+create table random_tabl (id int, val decimal)
+
+insert into random_tabl 
+select 1, random() from generate_series(1,1000000);
 
 
-------------------------------------HARD PROBLEM-------------------------------------
-CREATE TABLE customer_data (
-    transaction_id SERIAL PRIMARY KEY,
-    customer_name VARCHAR(100),
-    email VARCHAR(100),
-    phone VARCHAR(15),
-    payment_info VARCHAR(50),  -- sensitive
-    order_value DECIMAL,
-    order_date DATE DEFAULT CURRENT_DATE
+insert into random_tabl 
+select 2, random() from generate_series(1,1000000);
+
+--normal execution
+select id, avg(val), count(*)
+from random_tabl
+group by id;
+
+
+--execution by materialized view
+create materialized view mv_random_tabl
+as
+select id, avg(val), count(*)
+from random_tabl
+group by id;
+
+select *from mv_random_tabl
+
+
+--if you update anything in table, the mv doesn't gets updated
+---for that we have to refresh it
+
+------------------------------------------- (HARD LEVEL)------------------------------
+CREATE VIEW vW_ORDER_SUMMARY
+AS
+SELECT 
+    O.order_id,
+    O.order_date,
+    P.product_name,
+    C.full_name,
+    (P.unit_price * O.quantity) - ((P.unit_price * O.quantity) * O.discount_percent / 100) AS final_cost
+FROM customer_master AS C
+JOIN sales_orders AS O 
+    ON O.customer_id = C.customer_id
+JOIN product_catalog AS P
+    ON P.product_id = O.product_id;
+
+
+	--ACCESSING THE VIEW
+SELECT * FROM vW_ORDER_SUMMARY;
+-- STILL WE THE CLIENT CAN ACCESS THE CONTENTS OF THE TABLE BY ACCESSING THE SCRIPT FROM LEFT SIDE OBJECT EXPLORER
+-- IN THAT CASE, WE WILL USE ACCESS RIGHTS - CREATE USER FOR CLIENT - AND WILL GIVE PERMISSION TO THE CLIENT
+
+--APPLYING THE ACCESS RIGHTS TO THE VIEW FOR THE CLIENT
+
+--1. CREATE USER
+CREATE ROLE ALOK
+LOGIN
+PASSWORD 'alok';
+--now instead of sharing the credentials of my database to the client, i'll share with the specific user 'ALOK' in this case
+/*
+	open new query window -> connect to new user / sign in as new user
+	and in that query window try to access the newly created view
+
+	this will give error
+
+	now we will giev access to the client
+*/
+
+GRANT SELECT ON vW_ORDER_SUMMARY TO ALOK;
+--client will only be able to do the select, no alteration, and he can not see the sql
+REVOKE SELECT ON vW_ORDER_SUMMARY FROM ALOK;
+
+
+
+CREATE TABLE EMPLOYEE (
+  empId INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  dept TEXT NOT NULL
 );
 
--- Insert sample data
-INSERT INTO customer_data (customer_name, email, phone, payment_info, order_value)
-VALUES
-('Mandeep Kaur', 'mandeep@example.com', '9040122324', '1234-5678-9012-3456', 500),
-('Mandeep Kaur', 'mandeep@example.com', '9040122324', '1234-5678-9012-3456', 1000),
-('Jaskaran Singh', 'jaskaran@example.com', '9876543210', '9876-5432-1098-7654', 700),
-('Jaskaran Singh', 'jaskaran@example.com', '9876543210', '9876-5432-1098-7654', 300);
+-- insert
+INSERT INTO EMPLOYEE VALUES (0001, 'Clark', 'Sales');
+INSERT INTO EMPLOYEE VALUES (0002, 'Dave', 'Accounting');
+INSERT INTO EMPLOYEE VALUES (0003, 'Ava', 'Sales');
 
-CREATE OR REPLACE VIEW RESTRICTED_SALES_DATA AS
-SELECT
-CUSTOMER_NAME,
-COUNT(*) AS total_orders,
-SUM(order_value) as total_sales
-from customer_data
-group by customer_name;
+select *from employee;
 
-select * from restricted_sales_data;
+CREATE VIEW vW_STORE_SALES_DATA
+AS
+	SELECT EMPID, NAME, DEPT 
+	FROM EMPLOYEE
+	WHERE DEPT = 'Sales'
+	WITH CHECK OPTION;
 
-CREATE USER CLIENT1 WITH PASSWORD 'REPORT1234';
-GRANT SELECT ON RESTRICTED_SALES_DATA TO CLIENT1;
-REVOKE SELECT ON RESTRICTED_SALES_DATA FROM CLIENT1;
+SELECT *FROM vW_STORE_SALES_DATA;
+
+INSERT INTO vW_STORE_SALES_DATA(EMPID, NAME, DEPT) VALUES (5, 'Aman', 'Admin'); --VIOLATION CONDITION
+
+refresh materialized view mv_random_tabl;
